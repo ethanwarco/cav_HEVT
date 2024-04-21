@@ -75,7 +75,7 @@ otherVehicle = vehicle(scenario, ...
     'Position', [2 2 0], ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car1');
-otherVelocity = 3;
+otherVelocity = 3
 
 
 
@@ -133,7 +133,15 @@ for n = 1:time
     % calculate velocity if lastDistance and measuredDistance both exist
     if (lastDistance ~= -1 & measuredDistance ~= -1)
         relativeVelocity = (lastDistance - measuredDistance) / dt;
-        measuredVelocity = egoVelocity + relativeVelocity;
+        
+        % averages the measured velocity with the previous value to reduce
+        % error unless it is the first measured velocity value
+        if measuredVelocity ~= -1
+            measuredVelocity = (measuredVelocity + (egoVelocity + relativeVelocity)) / 2;
+        else
+            measuredVelocity = egoVelocity + relativeVelocity;
+        end
+        
     end
     display(measuredVelocity)
 
@@ -153,7 +161,7 @@ for n = 1:time
     % while the car is in the desired lane, it matches the speed of the car
     % behind it
     if inLane & measuredVelocity ~= -1
-        % this works sometimes :/
+        % this works sometimes
         egoVelocity = (egoVelocity * .9) + (measuredVelocity * .1);
     end
 
