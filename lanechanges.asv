@@ -57,8 +57,13 @@ scenario = drivingScenario;
 % Add all road segments
 roadCenters = [0 0 0;
     100 0 0];
+barrierCenters = [100 0 ]
 laneSpecification = lanespec(2);
 road(scenario, roadCenters, 'Lanes', laneSpecification, 'Name', 'Road');
+barrier(scenario, barrierCenters, ...
+    'ClassID', 5, ...
+    'Width', 0.61, ...
+    'Height', 0.81);
 
 % Add the ego vehicle
 egoVehicle = vehicle(scenario, ...
@@ -75,7 +80,7 @@ otherVehicle = vehicle(scenario, ...
     'Position', [2 2 0], ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car1');
-otherVelocity = 3;
+otherVelocity = 3
 
 
 
@@ -86,11 +91,21 @@ ll = visionDetectionGenerator('SensorIndex', 2, ...
     'Yaw', 135, ...
     'MaxRange', 50, ...
     'DetectorOutput', 'Objects only', ...
-    'Intrinsics', cameraIntrinsics([320 320],[320 240],[480 640]), ...
+    'ActorProfiles', profiles);
+ul = visionDetectionGenerator('SensorIndex', 2, ...
+    'SensorLocation', [0.95 0.9], ...
+    'Yaw', 45, ...
+    'MaxRange', 50, ...
+    'DetectorOutput', 'Objects only', ...
     'ActorProfiles', profiles);
 back = visionDetectionGenerator('SensorIndex', 1, ...
     'SensorLocation', [0 0], ...
     'Yaw', -180, ...
+    'MaxRange', 100, ...
+    'DetectorOutput', 'Objects only', ...
+    'ActorProfiles', profiles);
+forward = visionDetectionGenerator('SensorIndex', 1, ...
+    'SensorLocation', [3.7 0], ...
     'MaxRange', 100, ...
     'DetectorOutput', 'Objects only', ...
     'Intrinsics', cameraIntrinsics([1814.81018227767 1814.81018227767],[320 240],[480 640]), ...
@@ -118,27 +133,41 @@ for n = 1:time
 
     % collect measurement data and find distance from vehicle in y
     % direction, vehicles velocity, and lane data
-    leftDets = ll(targetPoses(egoVehicle), n * dt);
+    llDets = ll(targetPoses(egoVehicle), n * dt);
+    ulDets = ul(targetPoses(egoVehicle), n * dt);
     backDets = back(targetPoses(egoVehicle), n * dt);
+    forwardDets = forward(targetPoses(egoVehicle), n * dt);
     measuredDistance = -1;
-    centerOfLane = false;
 
     % calculates distance from car with left and back cameras
-    if (~isempty(leftDets))
-        measurement = leftDets{1,1}.Measurement;
+    if (~isempty(llDets))
+        measurement = llDets{1,1}.Measurement;
+        measuredDistance = abs(measurement(1));
+    elseif (~isempty(ulDets))
+        measurement = ulDets{1,1}.Measurement;
         measuredDistance = abs(measurement(1));
     elseif (~isempty(backDets))
         measurement = backDets{1,1}.Measurement;
+        measuredDistance = abs(measurement(1));
+    elseif (~isempty(forwardDets))
+        measurement = forwardDets{1,1}.Measurement;
         measuredDistance = abs(measurement(1));
     end
     
     % calculate velocity if lastDistance and measuredDistance both exist
     if (lastDistance ~= -1 & measuredDistance ~= -1)
         relativeVelocity = (lastDistance - measuredDistance) / dt;
-        measuredVelocity = egoVelocity + relativeVelocity;
+        
+        % averages the measured velocity with the previous value to reduce
+        % error unless it is the first measured velocity value
+        if measuredVelocity ~= -1
+            measuredVelocity = (measuredVelocity + (egoVelocity + relativeVelocity)) / 2;
+        else
+            measuredVelocity = egoVelocity + relativeVelocity;
+        end
+        
     end
-    display(measuredDist)
-    display(measuredVelocity);
+    display(measuredVelocity)
 
     % updates vehicle positions based off of their velocities
     otherVehicle.Position = [(otherVelocity * dt + otherVehicle.Position(1)) 2 0];
@@ -156,17 +185,14 @@ for n = 1:time
     % while the car is in the desired lane, it matches the speed of the car
     % behind it
     if inLane & measuredVelocity ~= -1
-        if measuredVelocity ~= -1
-            egoVelocity = measuredVelocity;
-        end
+        % this works sometimes
+        egoVelocity = (egoVelocity * .9) + (measuredVelocity * .1);
     end
 
     % only try to change lanes if not already in the desired lane
-    if ~inLane
-        if measuredDistance >= laneChangeDistance
-            changingLanes = true;
-            direction = [0.9848 0.1736 0];
-        end
+    if ~inLane & measuredDistance >= laneChangeDistance
+        changingLanes = true;
+        direction = [0.9848 0.1736 0];
     end
     
     % update last distance measurement

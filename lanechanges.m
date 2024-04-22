@@ -55,10 +55,14 @@ function [scenario, egoVehicle] = createDrivingScenario
 scenario = drivingScenario;
 
 % Add all road segments
-roadCenters = [0 0 0;
-    100 0 0];
+roadCenters = [0 0 0; 100 0 0];
+barrierCenters = [100 0 0; 100 -4 0];
 laneSpecification = lanespec(2);
 road(scenario, roadCenters, 'Lanes', laneSpecification, 'Name', 'Road');
+barrier(scenario, barrierCenters, ...
+    'ClassID', 5, ...
+    'Width', 0.61, ...
+    'Height', 0.81);
 
 % Add the ego vehicle
 egoVehicle = vehicle(scenario, ...
@@ -67,7 +71,7 @@ egoVehicle = vehicle(scenario, ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car');
 direction = [1 0 0];
-egoVelocity = 5;
+egoVelocity = 0;
 
 % Add the non-ego actors
 otherVehicle = vehicle(scenario, ...
@@ -75,7 +79,7 @@ otherVehicle = vehicle(scenario, ...
     'Position', [2 2 0], ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car1');
-otherVelocity = 3
+otherVelocity = 3;
 
 
 
@@ -86,12 +90,32 @@ ll = visionDetectionGenerator('SensorIndex', 2, ...
     'Yaw', 135, ...
     'MaxRange', 50, ...
     'DetectorOutput', 'Objects only', ...
+    'DetectionProbability', 1, ...
+    'FalsePositivesPerImage', 0, ...
+    'ActorProfiles', profiles);
+ul = visionDetectionGenerator('SensorIndex', 2, ...
+    'SensorLocation', [0.95 0.9], ...
+    'Yaw', 45, ...
+    'MaxRange', 50, ...
+    'DetectorOutput', 'Objects only', ...
+    'DetectionProbability', 1, ...
+    'FalsePositivesPerImage', 0, ...
     'ActorProfiles', profiles);
 back = visionDetectionGenerator('SensorIndex', 1, ...
     'SensorLocation', [0 0], ...
     'Yaw', -180, ...
     'MaxRange', 100, ...
     'DetectorOutput', 'Objects only', ...
+    'DetectionProbability', 1, ...
+    'FalsePositivesPerImage', 0, ...
+    'ActorProfiles', profiles);
+forward = visionDetectionGenerator('SensorIndex', 1, ...
+    'SensorLocation', [3.7 0], ...
+    'MaxRange', 100, ...
+    'DetectorOutput', 'Objects only', ...
+    'DetectionProbability', 1, ...
+    'FalsePositivesPerImage', 0, ...
+    'Intrinsics', cameraIntrinsics([1814.81018227767 1814.81018227767],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
 
 
@@ -102,8 +126,8 @@ time = 19 / dt;
 laneChangeDistance = 10;
 changingLanes = false;
 inLane = false;
-lastDistance = -1;
-measuredVelocity = -1;
+measuredVelocity = 9999999;
+measuredDistance = 9999999;
 timeToSwitchLanes = 3;
 for n = 1:time
     if changingLanes
@@ -116,34 +140,30 @@ for n = 1:time
 
     % collect measurement data and find distance from vehicle in y
     % direction, vehicles velocity, and lane data
-    leftDets = ll(targetPoses(egoVehicle), n * dt);
+    llDets = ll(targetPoses(egoVehicle), n * dt);
+    ulDets = ul(targetPoses(egoVehicle), n * dt);
     backDets = back(targetPoses(egoVehicle), n * dt);
-    measuredDistance = -1;
-    centerOfLane = false;
+    forwardDets = forward(targetPoses(egoVehicle), n * dt);
 
     % calculates distance from car with left and back cameras
-    if (~isempty(leftDets))
-        measurement = leftDets{1,1}.Measurement;
-        measuredDistance = abs(measurement(1));
+    if (~isempty(llDets))
+        measurement = llDets{1,1}.Measurement;
+        measuredDistance = measurement(1);
+        measuredVelocity = measurement(4);
+    elseif (~isempty(ulDets))
+        measurement = ulDets{1,1}.Measurement;
+        measuredDistance = measurement(1);
+        measuredVelocity = measurement(4);
     elseif (~isempty(backDets))
         measurement = backDets{1,1}.Measurement;
-        measuredDistance = abs(measurement(1));
+        measuredDistance = measurement(1);
+        measuredVelocity = measurement(4);
+    elseif (~isempty(forwardDets))
+        measurement = forwardDets{1,1}.Measurement;
+        measuredDistance = measurement(1);
+        measuredVelocity = measurement(4);
     end
-    
-    % calculate velocity if lastDistance and measuredDistance both exist
-    if (lastDistance ~= -1 & measuredDistance ~= -1)
-        relativeVelocity = (lastDistance - measuredDistance) / dt;
-        
-        % averages the measured velocity with the previous value to reduce
-        % error unless it is the first measured velocity value
-        if measuredVelocity ~= -1
-            measuredVelocity = (measuredVelocity + (egoVelocity + relativeVelocity)) / 2;
-        else
-            measuredVelocity = egoVelocity + relativeVelocity;
-        end
-        
-    end
-    display(measuredVelocity)
+    display(measuredVelocity);
 
     % updates vehicle positions based off of their velocities
     otherVehicle.Position = [(otherVelocity * dt + otherVehicle.Position(1)) 2 0];
@@ -160,20 +180,19 @@ for n = 1:time
 
     % while the car is in the desired lane, it matches the speed of the car
     % behind it
-    if inLane & measuredVelocity ~= -1
+    if inLane & measuredVelocity ~= 9999999
         % this works sometimes
         egoVelocity = (egoVelocity * .9) + (measuredVelocity * .1);
     end
 
     % only try to change lanes if not already in the desired lane
-    if ~inLane & measuredDistance >= laneChangeDistance
+    if ~inLane & abs(measuredDistance) >= laneChangeDistance
         changingLanes = true;
         direction = [0.9848 0.1736 0];
     end
     
-    % update last distance measurement
-    lastDistance = measuredDistance;
+    % update last distance
+    % measurement
     refreshdata
     drawnow
-    pause(.1)
 end
