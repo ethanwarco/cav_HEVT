@@ -4,7 +4,7 @@ function lanechanges
 scenario = drivingScenario;
 
 % Add all road segments
-roadCenters = [0 0 0; 100 0 0];
+roadCenters = [0 0 0; 180 0 0];
 barrierCenters = [100 0 0; 100 -4 0];
 laneSpecification = lanespec(2);
 road(scenario, roadCenters, 'Lanes', laneSpecification, 'Name', 'Road');
@@ -16,7 +16,7 @@ barrier(scenario, barrierCenters, ...
 % Add the ego vehicle
 egoVehicle = vehicle(scenario, ...
     'ClassID', 1, ...
-    'Position', [2 -2 0], ...
+    'Position', [20 -2 0], ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car');
 egoDirection = [1 0 0];
@@ -25,9 +25,25 @@ otherDirection = [1 0 0];
 vehicles = {egoVehicle};
 vehicles{2} = vehicle(scenario, ...
     'ClassID', 1, ...
-    'Position', [2 2 0], ...
+    'Position', [20 2 0], ...
     'Mesh', driving.scenario.carMesh, ...
     'Name', 'Car1');
+vehicles{3} = vehicle(scenario, ...
+    'ClassID', 1, ...
+    'Position', [40 -2 0], ...
+    'Mesh', driving.scenario.carMesh, ...
+    'Name', 'Car1');
+vehicles{4} = vehicle(scenario, ...
+    'ClassID', 1, ...
+    'Position', [10 -2 0], ...
+    'Mesh', driving.scenario.carMesh, ...
+    'Name', 'Car1');
+vehicles{5} = vehicle(scenario, ...
+    'ClassID', 1, ...
+    'Position', [45 2 0], ...
+    'Mesh', driving.scenario.carMesh, ...
+    'Name', 'Car1');
+
 
 
 
@@ -69,13 +85,13 @@ sensors{4} = visionDetectionGenerator('SensorIndex', 4, ...
     'DetectorOutput', 'Objects only', ...
     'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
-directions = {egoDirection otherDirection};
-velocities = [1 5];
+directions = {egoDirection otherDirection otherDirection otherDirection otherDirection};
+velocities = [5 3 5 4 4];
 
 
 
 dt = 1;
-time = 20 / dt;
+time = 30 / dt;
 laneChangeDistance = 10;
 safeDistance = 10;
 changingLane = -1;
@@ -101,9 +117,13 @@ for n = 1:time
         otherLaneMeasurements = getLaneMeasurements(measurements, -1);
         % get the cars in the current lane
         laneMeasurements = getLaneMeasurements(measurements, 0);
+        % get the direction the car should move to get closer to a possible
+        % lane change
+        direction = getLaneChangeDirection(otherLaneMeasurements, laneMeasurements);
 
         % adjust the cars speed according to the average speed
-        velocities(1) = velocities(1) * .8 * (1 / dt) + averageVelocity(laneMeasurements) * .2 * dt;
+        velocities(1) = velocities(1) * .6 * (1 / dt) + averageVelocity(laneMeasurements) * .4 * dt;
+        velocities(1) = velocities(1) + .1 * dt * direction * velocities(1);
 
         % determines if car has room to turn into the left lane
         canChange = canChangeLane(otherLaneMeasurements, 0);
@@ -209,23 +229,35 @@ function laneMeasurements = getLaneMeasurements(measurements, lane)
 end
 
 
-function direction = getLaneChangeDistances(otherLaneMeasurements, inLaneMeasurements)
+function direction = getLaneChangeDirection(otherLaneMeasurements, inLaneMeasurements)
     % closest front and closest back are the distance from the closest 
     % possible lane change in front of the egocar and behind the egocar
     closestFront = 99999;
-    closestBack = 99999;
+    closestBack = -99999;
     for i = 1:length(otherLaneMeasurements)
         % x is the distance from the egocar to a point where it could
         % potentially change lanes
-        x = otherLaneMeasurements{i}(1) + laneChangeDistance;
-        % checks if this opening in the road is a possible point to change lanes
-        if canChangeLane(otherLaneMeasurements, x)
+        frontx = otherLaneMeasurements{i}(1) + laneChangeDistance;
+        backx = otherLaneMeasurements{i}(1) - laneChangeDistance;
+
+        % checks if this opening in the road at frontx is a possible point to change lanes
+        if canChangeLane(otherLaneMeasurements, frontx)
             % checks whether it is closer to a previous closestFront or
             % closestBack
-            if x < closestFront & sign(closestFront) == sign(1)
-                closestFront = x;
-            elseif x > closestBack & sign(closestFront) == sign(-1)
-                closestBack = x;
+            if frontx < closestFront & sign(frontx) == sign(1)
+                closestFront = frontx;
+            elseif frontx > closestBack & sign(frontx) == sign(-1)
+                closestBack = frontx;
+            end
+        end
+        % checks if this opening in the road at backx is a possible point to change lanes
+        if canChangeLane(otherLaneMeasurements, backx)
+            % checks whether it is closer to a previous closestFront or
+            % closestBack
+            if backx < closestFront & sign(backx) == sign(1)
+                closestFront = backx;
+            elseif backx > closestBack & sign(backx) == sign(-1)
+                closestBack = backx;
             end
         end
     end
@@ -240,17 +272,35 @@ function direction = getLaneChangeDistances(otherLaneMeasurements, inLaneMeasure
     for i = 1:length(inLaneMeasurements)
         x = inLaneMeasurements{i}(1);
         if sign(x) == sign(1)
-            if abs(x) < safeDistance || x < closestFront
+            % if too close to another car in lane, go the opposite
+            % direction
+            if abs(x) < safeDistance
+                direction = -1;
+                return
+            end
+            if x < closestFront
                 closestFront = 99999;
             end
         else
-            if abs(x) < safeDistance || x < closestBack
-                closestBack = 99999;
+            if abs(x) < safeDistance
+                direction = 1;
+                return
+            end
+            if x > closestBack
+                closestBack = -99999;
             end
         end
     end
-
-    direction = sign(closestFront + closestBack);
+    
+    if closestBack == -99999 & closestFront == 99999
+        direction = 0;
+    elseif closestBack == -99999
+        direction = 1;
+    elseif closestFront == 99999
+        direction = -1;
+    else
+        direction = -1 * sign(closestFront + closestBack);
+    end
 end
 
 % returns whether the car can change lanes when it is dx away from its
