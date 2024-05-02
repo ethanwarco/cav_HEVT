@@ -147,7 +147,11 @@ for n = 1:time
     else
         % adjust the cars speed according to the average speed
         laneMeasurements = getLaneMeasurements(measurements, 0);
+        % get the direction the car should move in case it is too close to
+        % other cars
+        direction = getLaneChangeDirection({}, laneMeasurements);
         velocities(1) = velocities(1) * .8 * (1 / dt) + averageVelocity(laneMeasurements) * .2 * dt;
+        velocities(1) = velocities(1) + .1 * dt * direction * velocities(1);
     end
     
     prevMeasurements = measurements;
