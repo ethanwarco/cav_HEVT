@@ -36,47 +36,55 @@ profiles = actorProfiles(scenario);
 sensors = {};
 sensors{1} = visionDetectionGenerator('SensorIndex', 1, ...
     'SensorLocation', [1.5 -0.9], ...
+    'MaxRange', 99999, ...
     'Yaw', 90, ...
     'DetectionProbability', 1, ...
     'FalsePositivesPerImage', 0, ...
     'DetectorOutput', 'Objects only', ...
-    'Intrinsics', cameraIntrinsics([300 800],[320 240],[480 640]), ...
+    'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
 sensors{2} = visionDetectionGenerator('SensorIndex', 2, ...
     'SensorLocation', [1.5 0.9], ...
+    'MaxRange', 99999, ...
     'Yaw', -90, ...
     'DetectionProbability', 1, ...
     'FalsePositivesPerImage', 0, ...
     'DetectorOutput', 'Objects only', ...
-    'Intrinsics', cameraIntrinsics([300 800],[320 240],[480 640]), ...
+    'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
 sensors{3} = visionDetectionGenerator('SensorIndex', 3, ...
+    'MaxRange', 99999, ...
     'SensorLocation', [0.95 0], ...
     'DetectionProbability', 1, ...
     'FalsePositivesPerImage', 0, ...
     'DetectorOutput', 'Objects only', ...
-    'Intrinsics', cameraIntrinsics([300 800],[320 240],[480 640]), ...
+    'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
 sensors{4} = visionDetectionGenerator('SensorIndex', 4, ...
+    'MaxRange', 99999, ...
     'SensorLocation', [1.9 0], ...
     'Yaw', 180, ...
     'DetectionProbability', 1, ...
     'FalsePositivesPerImage', 0, ...
     'DetectorOutput', 'Objects only', ...
-    'Intrinsics', cameraIntrinsics([300 800],[320 240],[480 640]), ...
+    'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
 directions = {egoDirection otherDirection};
-velocities = [5 3];
+velocities = [1 5];
 
-plot(scenario)
+
 
 dt = 1;
-time = 19 / dt;
+time = 20 / dt;
 laneChangeDistance = 10;
+safeDistance = 10;
 changingLane = -1;
 inLane = false;
 laneVelocity = 0;
+prevMeasurements = {};
 for n = 1:time
+    plot(scenario)
+
     % collect measurement data and find distance from vehicle in y
     % direction, vehicles velocity, and lane data
     measurements = getMeasurements(n * dt, sensors, egoVehicle);
@@ -95,17 +103,17 @@ for n = 1:time
         laneMeasurements = getLaneMeasurements(measurements, 0);
 
         % adjust the cars speed according to the average speed
-        velocities(1) = velocities(1) * .8 + averageVelocity(laneMeasurements) * .2;
+        velocities(1) = velocities(1) * .8 * (1 / dt) + averageVelocity(laneMeasurements) * .2 * dt;
 
         % determines if car has room to turn into the left lane
         canChange = canChangeLane(otherLaneMeasurements, 0);
         if canChange
-            changingLane = 20.1557 / velocities(1);
+            % calculates the average speed in the lane you are turning into
+            laneVelocity = averageVelocity(otherLaneMeasurements)
+
+            changingLane = 20.1557 / ((velocities(1) + laneVelocity) / 2);
             % merges into lane at 80 degree angle
             directions{1} = [0.9848 0.1736 0];
-
-            % calculates the average speed in the lane you are turning into
-            laneVelocity = averageVelocity(otherLaneMeasurements);
         end
     elseif changingLane > 0
         if changingLane > 0
@@ -115,16 +123,16 @@ for n = 1:time
             directions{1} = [1 0 0];
             inLane = true;
         end
-        velocities(1) = velocities(1) * .5 + laneVelocity * .5;
+        velocities(1) = velocities(1) * .5 * (1 / dt) + laneVelocity * .5 * dt;
     else
         % adjust the cars speed according to the average speed
         laneMeasurements = getLaneMeasurements(measurements, 0);
-        velocities(1) = velocities(1) * .8 + averageVelocity(laneMeasurements) * .2;
+        velocities(1) = velocities(1) * .8 * (1 / dt) + averageVelocity(laneMeasurements) * .2 * dt;
     end
-
+    
+    prevMeasurements = measurements;
     refreshdata
     drawnow
-    plot(scenario)
 end
 
 
@@ -133,6 +141,7 @@ end
 % helper functions
 
 % returns all sensor measurements aggregated at a certain time
+% applies rotation matrix to x, y, vx and vy values based on the road angle
 function measurements = getMeasurements(time, sensors, egoVehicle)
     % detections array
     dets = {};
@@ -147,8 +156,18 @@ function measurements = getMeasurements(time, sensors, egoVehicle)
     for i = 1:length(dets)
             sensorDets = dets{i};
         for j = 1:length(sensorDets)
-            measure = sensorDets{j, 1}.Measurement;
-            measurements{index} = measure;
+            measurement = sensorDets{j, 1}.Measurement;
+
+            % calculates vehicles velocity and stores it in measurement at
+            % index 4
+            prevMeasurement = getPreviousMeasurement(measurement);
+            
+            measurement(4) = velocities(1);
+            if prevMeasurement ~= 99999
+                measurement(4) = measurement(4) + ((measurement(1) - prevMeasurement(1)) / dt);
+            end
+
+            measurements{index} = measurement;
             index = index + 1;
         end
     end
@@ -180,7 +199,7 @@ function laneMeasurements = getLaneMeasurements(measurements, lane)
     yhigh = 2 + abs(lane) * 4;
     for i = 1:length(measurements)
         ydiff = measurements{i}(2);
-        % last conditionbasically checks if the ydiff (which is opposite to the lane in 
+        % last condition basically checks if the ydiff (which is opposite to the lane in 
         % direction) is the same sign as laneMeasurements{index} = measurements{i};
         if ylow < ydiff & ydiff < yhigh & sign(lane) ~= sign(ydiff)
             laneMeasurements{index} = measurements{i};
@@ -189,18 +208,19 @@ function laneMeasurements = getLaneMeasurements(measurements, lane)
     end
 end
 
-% returns the distance from the closest possible lane change in front of 
-% the egocar and behind the egocar
-function closestDistances = getLaneChangeDistances(measurements)
+
+function direction = getLaneChangeDistances(otherLaneMeasurements, inLaneMeasurements)
+    % closest front and closest back are the distance from the closest 
+    % possible lane change in front of the egocar and behind the egocar
     closestFront = 99999;
     closestBack = 99999;
-    for i = 1:length(measurements)
+    for i = 1:length(otherLaneMeasurements)
         % x is the distance from the egocar to a point where it could
         % potentially change lanes
-        x = measurements{i}(1) + laneChangeDistance;
+        x = otherLaneMeasurements{i}(1) + laneChangeDistance;
         % checks if this opening in the road is a possible point to change lanes
-        if canChangeLane(measurements, x)
-            % checks whether it is closer to a previous closesFront or
+        if canChangeLane(otherLaneMeasurements, x)
+            % checks whether it is closer to a previous closestFront or
             % closestBack
             if x < closestFront & sign(closestFront) == sign(1)
                 closestFront = x;
@@ -209,7 +229,28 @@ function closestDistances = getLaneChangeDistances(measurements)
             end
         end
     end
-    closestDistances = [closestBack closestFront]
+    
+    % if the closestFront distance is larger than the distance of the car
+    % in front of the egocar, it is infeasible, and if the closestBack
+    % distance is larger than the distance of the car behind it, it is
+    % infeasible. If they are both feasible the function will return
+    % whichever direction has a closer lane change spot. additionally, if
+    % the front vehicle is closer than safeDistance, the forward direction
+    % will be considered infeasible
+    for i = 1:length(inLaneMeasurements)
+        x = inLaneMeasurements{i}(1);
+        if sign(x) == sign(1)
+            if abs(x) < safeDistance || x < closestFront
+                closestFront = 99999;
+            end
+        else
+            if abs(x) < safeDistance || x < closestBack
+                closestBack = 99999;
+            end
+        end
+    end
+
+    direction = sign(closestFront + closestBack);
 end
 
 % returns whether the car can change lanes when it is dx away from its
@@ -225,14 +266,39 @@ function canChange = canChangeLane(measurements, dx)
     end
 end
 
-% calculates the average velocity of the cars in the measurements including
-% the velocity of the egocar
+% calculates the average velocity of the cars in the measurements. if no
+% measurements, it returns the velocity of the egocar
 function avg = averageVelocity(measurements)
-    avg = velocities(1);
-    for i = 1:length(laneMeasurements)
-        avg = avg + laneMeasurements{i}(4);
+    avg = 0;
+    for i = 1:length(measurements)
+        avg = avg + measurements{i}(4);
     end
-    avg = avg / (length(laneMeasurements) + 1);
+    
+    if isempty(measurements)
+        avg = velocities(1);
+    else
+        avg = avg / length(measurements);
+    end
+end
+
+% given a parameter measurement, this will return its previous position
+% according to the prevMeasurements array. if no position is found, it will
+% return 99999
+function previous = getPreviousMeasurement(measurement)
+    x = measurement(1);
+    y = measurement(2);
+    previous = 99999;
+    for i = 1:length(prevMeasurements)
+        otherx = prevMeasurements{i}(1);
+        othery = prevMeasurements{i}(2);
+        % checks that othery and y are close to each other (the
+        % measurements are in the same lane) and that otherx and x are 
+        % close (they are the same car)
+        if abs(othery - y) < 2 & abs(otherx - x) < 10
+            previous = prevMeasurements{i};
+            return
+        end
+    end
 end
 
 end
