@@ -85,13 +85,17 @@ sensors{4} = visionDetectionGenerator('SensorIndex', 4, ...
     'DetectorOutput', 'Objects only', ...
     'Intrinsics', cameraIntrinsics([200 800],[320 240],[480 640]), ...
     'ActorProfiles', profiles);
+laneSensor = visionDetectionGenerator('SensorIndex', 1, ...
+    'SensorLocation', [0.95 0], ...
+    'DetectorOutput', 'Lanes only', ...
+    'ActorProfiles', profiles);
 directions = {egoDirection otherDirection otherDirection otherDirection otherDirection};
 velocities = [5 3 5 4 4];
 
 
 
 dt = 1;
-time = 30 / dt;
+time = 20 / dt;
 laneChangeDistance = 10;
 safeDistance = 10;
 changingLane = -1;
@@ -108,6 +112,13 @@ for n = 1:time
     % updates vehicle positions based off of their velocities
     updatePositions(vehicles, velocities, directions, dt);
     
+    % when not changing lane, adjust direction so that car is in center of
+    % lane
+    if changingLane == -1
+        adjustDirection();
+    end
+
+
     % when not in lane, check if there is room to switch lanes, and when
     % in lane, try to match the velocity of the other cars in your lane
     % the middle block keeps track of how long the car has been changing
@@ -129,7 +140,7 @@ for n = 1:time
         if canChange
             % calculates the average speed in the lane you are turning into
             laneVelocity = averageVelocity(otherLaneMeasurements)
-            
+
             v0 = velocities(1) * 0.1736; % initial horizontal velocity
             vf = laneVelocity * 0.1736; % final horizontal velocity
             changingLane = getLaneChangeTime(.5, v0, vf) / dt;
@@ -143,6 +154,7 @@ for n = 1:time
         if changingLane <= 0
             directions{1} = [1 0 0];
             inLane = true;
+            changingLane = -1;
         end
         velocities(1) = velocities(1) * (1 - .5 * dt) + laneVelocity * .5 * dt;
     else
@@ -153,10 +165,10 @@ for n = 1:time
         direction = getLaneChangeDirection({}, laneMeasurements);
         velocities(1) = velocities(1) * (1 - .2 * dt) + averageVelocity(laneMeasurements) * .2 * dt + .1 * dt * direction * velocities(1);
     end
-    
+
     prevMeasurements = measurements;
     refreshdata
-    drawnow
+    drawnow 
 end
 
 
@@ -165,7 +177,6 @@ end
 % helper functions
 
 % returns all sensor measurements aggregated at a certain time
-% applies rotation matrix to x, y, vx and vy values based on the road angle
 function measurements = getMeasurements(time, sensors, egoVehicle)
     % detections array
     dets = {};
@@ -360,9 +371,24 @@ end
 % velocity
 function time = getLaneChangeTime(p, v0, vf)
     L = 4; % lane change distance
-    a = vf / (v0 - vf);
+    a = (v0 - vf) / vf;
     b = a - (p * L / vf);
-    time = -1 * log(a * lambertw(exp(b) / a)) / p;
+    time = -1 * log(lambertw(a * exp(b)) / a) / p;
+end
+
+% adjusts the direction of the car based on the distance from the lane
+% marking
+function adjusted = adjustDirection()
+    adjusted = true;
+    detections = laneBoundaries(egoVehicle);
+    coords = detections.Coordinates;
+    
+    % makes the steering angle directly proportional to the distance from
+    % the center of the lane, with the angle being 45 degrees when it is
+    % completely on the lane
+    distance = coords(2) / 2 - 1; % normalized distance from the center of the lane
+    angle = distance * 3.14159 / 4;
+    directions{1} = [cos(angle) sin(angle) 0];
 end
 
 end
