@@ -103,7 +103,7 @@ for n = 1:time
 
     % collect measurement data and find distance from vehicle in y
     % direction, vehicles velocity, and lane data
-    measurements = getMeasurements(n * dt, sensors, egoVehicle);
+    measurements = getMeasurements(n, sensors, egoVehicle);
 
     % updates vehicle positions based off of their velocities
     updatePositions(vehicles, velocities, directions, dt);
@@ -115,23 +115,24 @@ for n = 1:time
     if ~inLane & changingLane == -1
         % get the cars in the left lane (the one we want to turn into)
         otherLaneMeasurements = getLaneMeasurements(measurements, -1);
-        % get the cars in the current lane
+        % get the cars in the current lanelin
         laneMeasurements = getLaneMeasurements(measurements, 0);
         % get the direction the car should move to get closer to a possible
         % lane change
         direction = getLaneChangeDirection(otherLaneMeasurements, laneMeasurements);
 
         % adjust the cars speed according to the average speed
-        velocities(1) = velocities(1) * .6 * (1 / dt) + averageVelocity(laneMeasurements) * .4 * dt;
-        velocities(1) = velocities(1) + .1 * dt * direction * velocities(1);
+        velocities(1) = velocities(1) * (1 - .4 * dt) + averageVelocity(laneMeasurements) * .4 * dt + .1 * dt * direction * velocities(1);
 
         % determines if car has room to turn into the left lane
         canChange = canChangeLane(otherLaneMeasurements, 0);
         if canChange
             % calculates the average speed in the lane you are turning into
             laneVelocity = averageVelocity(otherLaneMeasurements)
-
-            changingLane = 20.1557 / ((velocities(1) + laneVelocity) / 2);
+            
+            v0 = velocities(1) * 0.1736; % initial horizontal velocity
+            vf = laneVelocity * 0.1736; % final horizontal velocity
+            changingLane = getLaneChangeTime(.5, v0, vf) / dt;
             % merges into lane at 80 degree angle
             directions{1} = [0.9848 0.1736 0];
         end
@@ -143,15 +144,14 @@ for n = 1:time
             directions{1} = [1 0 0];
             inLane = true;
         end
-        velocities(1) = velocities(1) * .5 * (1 / dt) + laneVelocity * .5 * dt;
+        velocities(1) = velocities(1) * (1 - .5 * dt) + laneVelocity * .5 * dt;
     else
         % adjust the cars speed according to the average speed
         laneMeasurements = getLaneMeasurements(measurements, 0);
         % get the direction the car should move in case it is too close to
         % other cars
         direction = getLaneChangeDirection({}, laneMeasurements);
-        velocities(1) = velocities(1) * .8 * (1 / dt) + averageVelocity(laneMeasurements) * .2 * dt;
-        velocities(1) = velocities(1) + .1 * dt * direction * velocities(1);
+        velocities(1) = velocities(1) * (1 - .2 * dt) + averageVelocity(laneMeasurements) * .2 * dt + .1 * dt * direction * velocities(1);
     end
     
     prevMeasurements = measurements;
@@ -353,6 +353,16 @@ function previous = getPreviousMeasurement(measurement)
             return
         end
     end
+end
+
+% estimates the amount of time to change lane given the amount the car is
+% adjusting to the lane velocity, the intial velocity, and the final
+% velocity
+function time = getLaneChangeTime(p, v0, vf)
+    L = 4; % lane change distance
+    a = vf / (v0 - vf);
+    b = a - (p * L / vf);
+    time = -1 * log(a * lambertw(exp(b) / a)) / p;
 end
 
 end
